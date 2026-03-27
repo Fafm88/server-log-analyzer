@@ -1,11 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { useRoute, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -15,20 +12,20 @@ import {
   PieChart, Pie, Cell, LineChart, Line, CartesianGrid, Legend,
 } from "recharts";
 import {
-  Bot, Globe, AlertTriangle, Activity, ArrowLeft, FileText,
-  TrendingUp, Search,
+  Bot, Globe, AlertTriangle, Activity, ArrowLeft, FileText, Search,
 } from "lucide-react";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
+import { useLogStore } from "@/lib/log-store";
 
 const CHART_COLORS = [
-  "hsl(199, 89%, 40%)",  // teal/primary
-  "hsl(142, 71%, 38%)",  // green
-  "hsl(38, 92%, 50%)",   // amber
-  "hsl(0, 72%, 51%)",    // red
-  "hsl(262, 83%, 48%)",  // purple
-  "hsl(199, 60%, 55%)",  // light teal
-  "hsl(25, 80%, 50%)",   // orange
-  "hsl(320, 50%, 50%)",  // pink
+  "hsl(199, 89%, 40%)",
+  "hsl(142, 71%, 38%)",
+  "hsl(38, 92%, 50%)",
+  "hsl(0, 72%, 51%)",
+  "hsl(262, 83%, 48%)",
+  "hsl(199, 60%, 55%)",
+  "hsl(25, 80%, 50%)",
+  "hsl(320, 50%, 50%)",
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -91,35 +88,17 @@ export default function DashboardPage() {
   const [, params] = useRoute("/dashboard/:id");
   const [, setLocation] = useLocation();
   const sessionId = params?.id;
+  const { getAnalytics } = useLogStore();
 
-  const { data, isLoading, error } = useQuery<any>({
-    queryKey: ["/api/sessions", sessionId, "analytics"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/sessions/${sessionId}/analytics`);
-      return res.json();
-    },
-    enabled: !!sessionId,
-  });
+  const data = sessionId ? getAnalytics(sessionId) : null;
 
-  if (isLoading) {
-    return (
-      <div className="p-6 space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-4 gap-4">
-          {[1,2,3,4].map(i => <Skeleton key={i} className="h-24" />)}
-        </div>
-        <Skeleton className="h-72" />
-      </div>
-    );
-  }
-
-  if (error || !data) {
+  if (!data) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <AlertTriangle className="w-8 h-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Не удалось загрузить данные</p>
-        <Button variant="outline" size="sm" onClick={() => setLocation("/")}>
-          Назад
+        <p className="text-sm text-muted-foreground">Сессия не найдена. Загрузите лог-файл.</p>
+        <Button variant="outline" size="sm" onClick={() => setLocation("/upload")}>
+          Загрузить лог
         </Button>
       </div>
     );
@@ -127,28 +106,22 @@ export default function DashboardPage() {
 
   const { session, summary, statusCodes, botCrawl, topUrls, hourly, statusByBot, userAgents } = data;
 
-  // Prepare chart data
   const statusGroupData = Object.entries(summary.statusGroups).map(([k, v]) => ({
     name: k, value: v as number,
   }));
 
   const botPercentage = summary.totalRequests > 0
-    ? ((summary.botRequests / summary.totalRequests) * 100).toFixed(1)
-    : "0";
-
+    ? ((summary.botRequests / summary.totalRequests) * 100).toFixed(1) : "0";
   const errorPercentage = summary.totalRequests > 0
-    ? ((summary.errorRequests / summary.totalRequests) * 100).toFixed(1)
-    : "0";
+    ? ((summary.errorRequests / summary.totalRequests) * 100).toFixed(1) : "0";
 
-  // Hourly chart data
-  const hourlyData = (hourly || []).map((h: any) => ({
+  const hourlyData = (hourly || []).map((h) => ({
     hour: h.hour?.slice(11, 13) || h.hour,
     total: h.total,
     bots: h.bots,
     users: h.total - h.bots,
   }));
 
-  // Bot status breakdown
   const botStatusMap: Record<string, Record<string, number>> = {};
   for (const row of statusByBot || []) {
     if (!botStatusMap[row.botName]) botStatusMap[row.botName] = {};
@@ -178,60 +151,35 @@ export default function DashboardPage() {
       <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
         {/* KPI Row */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard
-            icon={Activity}
-            label="Всего запросов"
-            value={summary.totalRequests}
-            variant="default"
-          />
-          <KpiCard
-            icon={Bot}
-            label="Запросы ботов"
-            value={summary.botRequests}
-            sub={`${botPercentage}% от общего`}
-            variant="default"
-          />
-          <KpiCard
-            icon={AlertTriangle}
-            label="Ошибки (4xx/5xx)"
-            value={summary.errorRequests}
+          <KpiCard icon={Activity} label="Всего запросов" value={summary.totalRequests} variant="default" />
+          <KpiCard icon={Bot} label="Запросы ботов" value={summary.botRequests}
+            sub={`${botPercentage}% от общего`} variant="default" />
+          <KpiCard icon={AlertTriangle} label="Ошибки (4xx/5xx)" value={summary.errorRequests}
             sub={`${errorPercentage}% от общего`}
-            variant={Number(errorPercentage) > 10 ? "error" : "warning"}
-          />
-          <KpiCard
-            icon={Globe}
-            label="Уникальных URL"
-            value={summary.uniqueUrls}
-            sub="топ-30"
-            variant="default"
-          />
+            variant={Number(errorPercentage) > 10 ? "error" : "warning"} />
+          <KpiCard icon={Globe} label="Уникальных URL" value={summary.uniqueUrls} variant="default" />
         </div>
 
         {/* Tabs */}
         <Tabs defaultValue="crawl" className="space-y-4">
           <TabsList data-testid="tabs-navigation">
             <TabsTrigger value="crawl" data-testid="tab-crawl">
-              <Bot className="w-3.5 h-3.5 mr-1.5" />
-              Краулинг
+              <Bot className="w-3.5 h-3.5 mr-1.5" />Краулинг
             </TabsTrigger>
             <TabsTrigger value="status" data-testid="tab-status">
-              <Activity className="w-3.5 h-3.5 mr-1.5" />
-              Коды ответов
+              <Activity className="w-3.5 h-3.5 mr-1.5" />Коды ответов
             </TabsTrigger>
             <TabsTrigger value="agents" data-testid="tab-agents">
-              <Search className="w-3.5 h-3.5 mr-1.5" />
-              User-Agents
+              <Search className="w-3.5 h-3.5 mr-1.5" />User-Agents
             </TabsTrigger>
             <TabsTrigger value="urls" data-testid="tab-urls">
-              <Globe className="w-3.5 h-3.5 mr-1.5" />
-              Топ URL
+              <Globe className="w-3.5 h-3.5 mr-1.5" />Топ URL
             </TabsTrigger>
           </TabsList>
 
           {/* Crawl Budget Tab */}
           <TabsContent value="crawl" className="space-y-4">
             <div className="grid lg:grid-cols-2 gap-4">
-              {/* Bot crawl stats */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Активность ботов</CardTitle>
@@ -255,7 +203,6 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
 
-              {/* Bot status codes */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Коды ответов по ботам</CardTitle>
@@ -304,7 +251,6 @@ export default function DashboardPage() {
               </Card>
             </div>
 
-            {/* Hourly distribution */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Распределение запросов по часам</CardTitle>
@@ -346,16 +292,12 @@ export default function DashboardPage() {
                           data={statusGroupData}
                           cx="50%" cy="50%"
                           innerRadius={50} outerRadius={85}
-                          dataKey="value"
-                          nameKey="name"
-                          strokeWidth={2}
-                          stroke="hsl(var(--card))"
+                          dataKey="value" nameKey="name"
+                          strokeWidth={2} stroke="hsl(var(--card))"
                         >
                           {statusGroupData.map((entry, i) => (
-                            <Cell
-                              key={entry.name}
-                              fill={STATUS_COLORS[entry.name] || CHART_COLORS[i % CHART_COLORS.length]}
-                            />
+                            <Cell key={entry.name}
+                              fill={STATUS_COLORS[entry.name] || CHART_COLORS[i % CHART_COLORS.length]} />
                           ))}
                         </Pie>
                         <Tooltip content={<CustomTooltip />} />
@@ -364,10 +306,8 @@ export default function DashboardPage() {
                     <div className="flex flex-col gap-2">
                       {statusGroupData.map((entry, i) => (
                         <div key={entry.name} className="flex items-center gap-2">
-                          <span
-                            className="w-3 h-3 rounded-sm shrink-0"
-                            style={{ background: STATUS_COLORS[entry.name] || CHART_COLORS[i % CHART_COLORS.length] }}
-                          />
+                          <span className="w-3 h-3 rounded-sm shrink-0"
+                            style={{ background: STATUS_COLORS[entry.name] || CHART_COLORS[i % CHART_COLORS.length] }} />
                           <span className="text-xs font-medium">{entry.name}</span>
                           <span className="text-xs text-muted-foreground tabular-nums">
                             {entry.value.toLocaleString("ru-RU")} ({((entry.value / summary.totalRequests) * 100).toFixed(1)}%)
@@ -394,7 +334,7 @@ export default function DashboardPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {statusCodes.map((row: any) => (
+                        {statusCodes.map((row) => (
                           <TableRow key={row.statusCode}>
                             <TableCell><StatusBadge code={row.statusCode} /></TableCell>
                             <TableCell className="text-xs text-right tabular-nums">
@@ -431,7 +371,7 @@ export default function DashboardPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(userAgents || []).map((row: any, i: number) => (
+                      {(userAgents || []).map((row, i) => (
                         <TableRow key={i}>
                           <TableCell className="text-xs font-mono max-w-[300px] truncate" title={row.userAgent}>
                             {row.userAgent}
@@ -439,8 +379,7 @@ export default function DashboardPage() {
                           <TableCell>
                             {row.isBot ? (
                               <Badge variant="outline" className="text-xs">
-                                <Bot className="w-3 h-3 mr-1" />
-                                {row.botName || "Бот"}
+                                <Bot className="w-3 h-3 mr-1" />{row.botName || "Бот"}
                               </Badge>
                             ) : (
                               <span className="text-xs text-muted-foreground">Пользователь</span>
@@ -478,7 +417,7 @@ export default function DashboardPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(topUrls || []).map((row: any, i: number) => (
+                      {(topUrls || []).map((row, i) => (
                         <TableRow key={i}>
                           <TableCell className="text-xs font-mono max-w-[400px] truncate" title={row.url}>
                             {row.url}

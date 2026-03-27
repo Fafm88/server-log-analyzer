@@ -1,10 +1,7 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -12,23 +9,11 @@ import {
   Upload, FileText, Trash2, BarChart3, Server,
 } from "lucide-react";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
+import { useLogStore } from "@/lib/log-store";
 
 export default function HomePage() {
   const [, setLocation] = useLocation();
-  const queryClient = useQueryClient();
-
-  const { data: sessions, isLoading } = useQuery<any[]>({
-    queryKey: ["/api/sessions"],
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/sessions/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
-    },
-  });
+  const { sessions, deleteSession } = useLogStore();
 
   return (
     <div className="min-h-screen">
@@ -55,11 +40,7 @@ export default function HomePage() {
       </div>
 
       <div className="p-6 max-w-[1400px] mx-auto space-y-6">
-        {isLoading ? (
-          <div className="space-y-3">
-            {[1,2,3].map(i => <Skeleton key={i} className="h-16" />)}
-          </div>
-        ) : !sessions || sessions.length === 0 ? (
+        {sessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
             <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center">
               <Server className="w-7 h-7 text-muted-foreground" />
@@ -91,8 +72,12 @@ export default function HomePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sessions.map((s: any) => (
-                    <TableRow key={s.id} className="cursor-pointer group" onClick={() => setLocation(`/dashboard/${s.id}`)}>
+                  {sessions.map((s) => (
+                    <TableRow
+                      key={s.id}
+                      className="cursor-pointer group"
+                      onClick={() => setLocation(`/dashboard/${s.id}`)}
+                    >
                       <TableCell className="text-sm">
                         <div className="flex items-center gap-2">
                           <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -130,7 +115,7 @@ export default function HomePage() {
                           <Button
                             variant="ghost" size="icon"
                             className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                            onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(s.id); }}
+                            onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
                             data-testid={`button-delete-${s.id}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
