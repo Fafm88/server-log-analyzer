@@ -24,6 +24,7 @@ import { useLogStore } from "@/lib/log-store";
 import type { UserAgentRow, DetailRow, BotErrorRow, BotIpsEntry } from "@/lib/log-store";
 import { VirtualTable, type VirtualColumn } from "@/components/VirtualTable";
 import { BotVerifyBadge } from "@/components/BotVerifyBadge";
+import { ColumnHelp } from "@/components/ColumnHelp";
 import { downloadCSV } from "@/lib/csv";
 import {
   verifyBotIps, badgeForBot,
@@ -488,11 +489,21 @@ export default function DashboardPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-xs">Бот</TableHead>
-                          <TableHead className="text-xs text-right">2xx</TableHead>
-                          <TableHead className="text-xs text-right">3xx</TableHead>
-                          <TableHead className="text-xs text-right">4xx</TableHead>
-                          <TableHead className="text-xs text-right">5xx</TableHead>
+                          <TableHead className="text-xs">
+                            <ColumnHelp text="Имя бота, определённое по User-Agent. Иконка слева показывает результат проверки подлинности (если проверка была запущена).">Бот</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Успешные запросы (код 200–299). Норма — основная часть трафика бота должна попадать сюда.">2xx</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Перенаправления (код 300–399). Много 301/302 для бота — повод проверить, не теряется ли crawl-бюджет на цепочки редиректов.">3xx</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Ошибки клиента (код 400–499): 404 Not Found, 403 Forbidden и др. Критично для SEO — это URL, которые поисковик видит как битые.">4xx</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Ошибки сервера (код 500–599). Очень плохо для SEO — сигнал поисковику, что сайт нестабилен.">5xx</ColumnHelp>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -593,11 +604,21 @@ export default function DashboardPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-xs">Бот</TableHead>
-                          <TableHead className="text-xs text-right">Первая половина</TableHead>
-                          <TableHead className="text-xs text-right">Вторая половина</TableHead>
-                          <TableHead className="text-xs text-right">Изменение</TableHead>
-                          <TableHead className="text-xs text-right">%</TableHead>
+                          <TableHead className="text-xs">
+                            <ColumnHelp text="Имя поискового бота или LLM-краулера.">Бот</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Количество запросов этого бота в первой половине анализируемого периода.">Первая половина</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Количество запросов этого бота во второй половине периода.">Вторая половина</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Разница между первой и второй половиной. Плюс — рост, минус — падение.">Изменение</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Относительное изменение в процентах. Падение больше крупного бота на − 30 % и больше — повод проверить: мог измениться robots.txt, произойти сбой или резко урезался crawl-бюджет.">%</ColumnHelp>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -702,9 +723,15 @@ export default function DashboardPage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-xs">Код</TableHead>
-                          <TableHead className="text-xs text-right">Количество</TableHead>
-                          <TableHead className="text-xs text-right">Доля</TableHead>
+                          <TableHead className="text-xs">
+                            <ColumnHelp text="Конкретный HTTP-код ответа сервера (например, 200, 301, 404, 500).">Код</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Сколько раз сервер вернул этот код ответа за весь период лога.">Количество</ColumnHelp>
+                          </TableHead>
+                          <TableHead className="text-xs text-right">
+                            <ColumnHelp align="right" text="Процент от общего числа запросов в логе.">Доля</ColumnHelp>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -788,11 +815,21 @@ export default function DashboardPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="text-xs w-[50%]">URL</TableHead>
-                        <TableHead className="text-xs text-right">Всего</TableHead>
-                        <TableHead className="text-xs text-right">Боты</TableHead>
-                        <TableHead className="text-xs text-right">Люди</TableHead>
-                        <TableHead className="text-xs text-right">Ср. код</TableHead>
+                        <TableHead className="text-xs w-[50%]">
+                          <ColumnHelp text="Адрес страницы на вашем сайте (без домена).">URL</ColumnHelp>
+                        </TableHead>
+                        <TableHead className="text-xs text-right">
+                          <ColumnHelp align="right" text="Общее количество запросов к этому URL от всех источников — и ботов, и людей.">Всего</ColumnHelp>
+                        </TableHead>
+                        <TableHead className="text-xs text-right">
+                          <ColumnHelp align="right" text="Сколько из этих запросов сделали боты (поисковые, LLM, другие). Высокая доля ботов + низкая доля людей может означать, что страница не ищется пользователями.">Боты</ColumnHelp>
+                        </TableHead>
+                        <TableHead className="text-xs text-right">
+                          <ColumnHelp align="right" text="Сколько запросов сделали реальные пользователи (все, кто не опознан как бот). Высокое число = страница имеет реальный трафик.">Люди</ColumnHelp>
+                        </TableHead>
+                        <TableHead className="text-xs text-right">
+                          <ColumnHelp align="right" text="Средний HTTP-код для этого URL. Норма — близко к 200. Значения 300+ указывают, что страница иногда отдаёт редиректы или ошибки.">Ср. код</ColumnHelp>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -875,7 +912,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
 
   const columns: VirtualColumn<UserAgentRow>[] = [
     {
-      key: "ua", header: "User-Agent", width: "minmax(260px, 3fr)",
+      key: "ua",
+      header: <ColumnHelp text="Строка User-Agent — как браузер или бот представился серверу. Может быть поддельным — запустите проверку подлинности, чтобы проверить.">User-Agent</ColumnHelp>,
+      width: "minmax(260px, 3fr)",
       cell: (row) => (
         <div className="font-mono truncate" title={row.userAgent}>
           {row.userAgent || "(пусто)"}
@@ -883,7 +922,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "type", header: "Тип", width: "160px",
+      key: "type",
+      header: <ColumnHelp text="Определение типа агента по сигнатуре в User-Agent. «Бот» с указанием названия — узнанный краулер, «Пользователь» — обычный браузер.">Тип</ColumnHelp>,
+      width: "160px",
       cell: (row) => row.isBot ? (
         <span className="inline-flex items-center gap-1.5">
           {row.botName && <BotVerifyBadge badge={getBadge(row.botName)} botName={row.botName} />}
@@ -896,11 +937,15 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "count", header: "Запросы", width: "90px", align: "right",
+      key: "count",
+      header: <ColumnHelp align="right" text="Общее число запросов с этим User-Agent за период.">Запросы</ColumnHelp>,
+      width: "90px", align: "right",
       cell: (row) => <span className="tabular-nums font-medium">{row.count.toLocaleString("ru-RU")}</span>,
     },
     {
-      key: "2xx", header: "2xx", width: "60px", align: "right",
+      key: "2xx",
+      header: <ColumnHelp align="right" text="Успешные ответы (200–299) для этого агента.">2xx</ColumnHelp>,
+      width: "60px", align: "right",
       cell: (row) => (
         <span className="tabular-nums text-green-600 dark:text-green-400">
           {row.statusCounts["2xx"]?.toLocaleString("ru-RU") || "—"}
@@ -908,7 +953,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "3xx", header: "3xx", width: "60px", align: "right",
+      key: "3xx",
+      header: <ColumnHelp align="right" text="Перенаправления (300–399) для этого агента.">3xx</ColumnHelp>,
+      width: "60px", align: "right",
       cell: (row) => (
         <span className="tabular-nums text-primary">
           {row.statusCounts["3xx"]?.toLocaleString("ru-RU") || "—"}
@@ -916,7 +963,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "4xx", header: "4xx", width: "60px", align: "right",
+      key: "4xx",
+      header: <ColumnHelp align="right" text="Ошибки клиента (400–499) для этого агента. Часто 404 — битые URL.">4xx</ColumnHelp>,
+      width: "60px", align: "right",
       cell: (row) => (
         <span className="tabular-nums text-amber-600 dark:text-amber-400">
           {row.statusCounts["4xx"]?.toLocaleString("ru-RU") || "—"}
@@ -924,7 +973,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "5xx", header: "5xx", width: "60px", align: "right",
+      key: "5xx",
+      header: <ColumnHelp align="right" text="Ошибки сервера (500–599) для этого агента.">5xx</ColumnHelp>,
+      width: "60px", align: "right",
       cell: (row) => (
         <span className="tabular-nums text-red-600 dark:text-red-400">
           {row.statusCounts["5xx"]?.toLocaleString("ru-RU") || "—"}
@@ -932,7 +983,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "topUrl", header: "Самый частый URL", width: "minmax(180px, 2fr)",
+      key: "topUrl",
+      header: <ColumnHelp text="URL, к которому этот агент обращался чаще всего. Полезно, чтобы понять, на чём фокусируется краулер.">Самый частый URL</ColumnHelp>,
+      width: "minmax(180px, 2fr)",
       cell: (row) => (
         <div className="font-mono text-muted-foreground truncate" title={row.topUrl}>
           {row.topUrl || "—"}
@@ -940,7 +993,9 @@ function UserAgentsView({ userAgents, totalRequests, getBadge }: {
       ),
     },
     {
-      key: "share", header: "Доля", width: "70px", align: "right",
+      key: "share",
+      header: <ColumnHelp align="right" text="Доля запросов этого агента от всего трафика.">Доля</ColumnHelp>,
+      width: "70px", align: "right",
       cell: (row) => (
         <span className="tabular-nums text-muted-foreground">
           {((row.count / totalRequests) * 100).toFixed(1)}%
@@ -1112,17 +1167,23 @@ function DetailsView({ details, detailsTruncated, getBadge }: {
 
   const columns: VirtualColumn<DetailRow>[] = [
     {
-      key: "url", header: "URL", width: "minmax(200px, 2fr)",
+      key: "url",
+      header: <ColumnHelp text="Адрес страницы на вашем сайте.">URL</ColumnHelp>,
+      width: "minmax(200px, 2fr)",
       cell: (row) => (
         <div className="font-mono truncate" title={row.url}>{row.url}</div>
       ),
     },
     {
-      key: "status", header: "Код", width: "70px", align: "center",
+      key: "status",
+      header: <ColumnHelp align="center" text="HTTP-код ответа сервера для этой комбинации URL+User-Agent.">Код</ColumnHelp>,
+      width: "70px", align: "center",
       cell: (row) => <StatusBadge code={row.statusCode} />,
     },
     {
-      key: "type", header: "Тип", width: "160px",
+      key: "type",
+      header: <ColumnHelp text="Тип агента: бот с указанием названия или обычный пользователь.">Тип</ColumnHelp>,
+      width: "160px",
       cell: (row) => row.isBot ? (
         <span className="inline-flex items-center gap-1.5">
           {row.botName && <BotVerifyBadge badge={getBadge(row.botName)} botName={row.botName} />}
@@ -1135,7 +1196,9 @@ function DetailsView({ details, detailsTruncated, getBadge }: {
       ),
     },
     {
-      key: "ua", header: "User-Agent", width: "minmax(200px, 2fr)",
+      key: "ua",
+      header: <ColumnHelp text="Полная строка User-Agent, которую передал клиент.">User-Agent</ColumnHelp>,
+      width: "minmax(200px, 2fr)",
       cell: (row) => (
         <div className="font-mono text-muted-foreground truncate" title={row.userAgent}>
           {row.userAgent || "(пусто)"}
@@ -1143,7 +1206,9 @@ function DetailsView({ details, detailsTruncated, getBadge }: {
       ),
     },
     {
-      key: "count", header: "Запросы", width: "90px", align: "right",
+      key: "count",
+      header: <ColumnHelp align="right" text="Сколько раз встречалась именно эта комбинация URL + код + User-Agent.">Запросы</ColumnHelp>,
+      width: "90px", align: "right",
       cell: (row) => (
         <span className="tabular-nums font-medium">{row.count.toLocaleString("ru-RU")}</span>
       ),
@@ -1328,17 +1393,23 @@ function BotErrorsView({ botErrors, getBadge }: {
 
   const columns: VirtualColumn<BotErrorRow>[] = [
     {
-      key: "url", header: "URL", width: "minmax(260px, 3fr)",
+      key: "url",
+      header: <ColumnHelp text="URL, который отдал ошибку поисковому боту. Кандидаты на удаление или исправление.">URL</ColumnHelp>,
+      width: "minmax(260px, 3fr)",
       cell: (row) => (
         <div className="font-mono truncate" title={row.url}>{row.url}</div>
       ),
     },
     {
-      key: "code", header: "Код", width: "80px", align: "center",
+      key: "code",
+      header: <ColumnHelp align="center" text="HTTP-код ошибки. 404 — страница не найдена, 403 — запрет, 500 — ошибка сервера.">Код</ColumnHelp>,
+      width: "80px", align: "center",
       cell: (row) => <StatusBadge code={row.statusCode} />,
     },
     {
-      key: "bot", header: "Бот", width: "170px",
+      key: "bot",
+      header: <ColumnHelp text="Какой бот получил эту ошибку. Иконка слева показывает результат проверки подлинности.">Бот</ColumnHelp>,
+      width: "170px",
       cell: (row) => (
         <span className="inline-flex items-center gap-1.5">
           <BotVerifyBadge badge={getBadge(row.botName)} botName={row.botName} />
@@ -1349,7 +1420,9 @@ function BotErrorsView({ botErrors, getBadge }: {
       ),
     },
     {
-      key: "count", header: "Обращений", width: "110px", align: "right",
+      key: "count",
+      header: <ColumnHelp align="right" text="Сколько раз бот генерировал этот код ошибки на этом URL. Частые 404 у бота — сигнал, что на страницу есть внутренние ссылки или она в sitemap.">Обращений</ColumnHelp>,
+      width: "110px", align: "right",
       cell: (row) => (
         <span className="tabular-nums font-medium">{row.count.toLocaleString("ru-RU")}</span>
       ),
@@ -1707,13 +1780,27 @@ function VerifyView({ state, botIps, onStart }: {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-xs">Бот</TableHead>
-                <TableHead className="text-xs text-right">Всего IP</TableHead>
-                <TableHead className="text-xs text-right">Проверено</TableHead>
-                <TableHead className="text-xs text-right text-green-700 dark:text-green-400">Настоящих</TableHead>
-                <TableHead className="text-xs text-right text-red-700 dark:text-red-400">Поддельных</TableHead>
-                <TableHead className="text-xs text-right text-muted-foreground">Без PTR</TableHead>
-                <TableHead className="text-xs text-right text-amber-700 dark:text-amber-400">Ошибки</TableHead>
+                <TableHead className="text-xs">
+                  <ColumnHelp text="Имя поискового бота, заявленное в логах.">Бот</ColumnHelp>
+                </TableHead>
+                <TableHead className="text-xs text-right">
+                  <ColumnHelp align="right" text="Общее число уникальных IP-адресов, с которых этот бот обращался за период лога.">Всего IP</ColumnHelp>
+                </TableHead>
+                <TableHead className="text-xs text-right">
+                  <ColumnHelp align="right" text="Сколько IP было реально проверено через DNS-запросы. Проверяются до 200 самых активных IP на каждый бот.">Проверено</ColumnHelp>
+                </TableHead>
+                <TableHead className="text-xs text-right text-green-700 dark:text-green-400">
+                  <ColumnHelp align="right" text="IP, у которых цепочка reverse DNS → forward DNS сошлась и имя хоста принадлежит нужному поисковику (googlebot.com / google.com / yandex.ru и т.д.). Это действительно бот, за которого он себя выдаёт.">Настоящих</ColumnHelp>
+                </TableHead>
+                <TableHead className="text-xs text-right text-red-700 dark:text-red-400">
+                  <ColumnHelp align="right" text="IP, которые выдают себя за поискового бота, но DNS-проверка выяснила, что это не так. Обычно это парсеры и сканеры. Их можно смело блокировать.">Поддельных</ColumnHelp>
+                </TableHead>
+                <TableHead className="text-xs text-right text-muted-foreground">
+                  <ColumnHelp align="right" text="IP, у которых нет PTR-записи. PTR (Pointer Record) — это обратная DNS-запись, связывающая IP с доменом. Без неё нельзя однозначно сказать, подделка это или нет, но настоящие Googlebot/YandexBot всегда имеют PTR.">Без PTR</ColumnHelp>
+                </TableHead>
+                <TableHead className="text-xs text-right text-amber-700 dark:text-amber-400">
+                  <ColumnHelp align="right" text="IP, которые не удалось проверить из-за сетевых ошибок (timeout, недоступен DNS-сервер). Можно повторить проверку.">Ошибки</ColumnHelp>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1772,10 +1859,18 @@ function VerifyView({ state, botIps, onStart }: {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs">Бот (объявлен)</TableHead>
-                    <TableHead className="text-xs">IP</TableHead>
-                    <TableHead className="text-xs">PTR</TableHead>
-                    <TableHead className="text-xs">Причина</TableHead>
+                    <TableHead className="text-xs">
+                      <ColumnHelp text="Бот, за которого себя выдаёт IP (значение из User-Agent). Реально он им не является.">Бот (объявлен)</ColumnHelp>
+                    </TableHead>
+                    <TableHead className="text-xs">
+                      <ColumnHelp text="IP-адрес из логов, который обращался к вашему сайту.">IP</ColumnHelp>
+                    </TableHead>
+                    <TableHead className="text-xs">
+                      <ColumnHelp text="Домен, который возвращает обратный DNS-запрос (PTR-запись) по этому IP. Настоящий Googlebot возвращает адрес вида *.googlebot.com; YandexBot — *.yandex.ru/.net/.com.">PTR</ColumnHelp>
+                    </TableHead>
+                    <TableHead className="text-xs">
+                      <ColumnHelp text="Почему этот IP признан подделкой.">Причина</ColumnHelp>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
