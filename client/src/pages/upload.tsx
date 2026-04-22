@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Upload, FileText, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Upload, FileText, AlertCircle, CheckCircle2, X, Info } from "lucide-react";
 import { useLogStore } from "@/lib/log-store";
 import type { AnalyticsData } from "@/lib/log-store";
 import LogWorker from "@/lib/log-worker?worker";
@@ -12,35 +12,38 @@ export default function UploadPage() {
   const [, setLocation] = useLocation();
   const { addAnalytics } = useLogStore();
   const [dragActive, setDragActive] = useState(false);
-  const [status, setStatus] = useState<"idle" | "reading" | "parsing" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "parsing" | "done" | "error">("idle");
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
   const [result, setResult] = useState<{ parsedLines: number; totalLines: number } | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState("");
-  const [selectedFileSize, setSelectedFileSize] = useState(0);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [linesInfo, setLinesInfo] = useState("");
+  const [fileProgress, setFileProgress] = useState("");
   const workerRef = useRef<Worker | null>(null);
 
-  const processFile = useCallback(
-    (file: File) => {
-      setSelectedFileName(file.name);
-      setSelectedFileSize(file.size);
+  const totalSize = selectedFiles.reduce((s, f) => s + f.size, 0);
+
+  const processFiles = useCallback(
+    (files: File[]) => {
+      if (files.length === 0) return;
+      setSelectedFiles(files);
       setStatus("parsing");
       setProgress(0);
       setErrorMsg("");
       setLinesInfo("");
+      setFileProgress("");
 
-      // Terminate previous worker if any
-      if (workerRef.current) {
-        workerRef.current.terminate();
-      }
-
+      if (workerRef.current) workerRef.current.terminate();
       const worker = new LogWorker();
       workerRef.current = worker;
 
+      // Session name: single file → its name; multi → "N files" summary
+      const sessionName = files.length === 1
+        ? files[0].name
+        : `${files.length} файлов: ${files[0].name}${files.length > 1 ? `, …` : ""}`;
+
       worker.onmessage = (e: MessageEvent) => {
         const msg = e.data;
-
         if (msg.type === "progress") {
           const pct = msg.totalBytes > 0
             ? Math.round((msg.bytesRead / msg.totalBytes) * 90)
@@ -49,19 +52,27 @@ export default function UploadPage() {
           setLinesInfo(
             `${formatNumber(msg.linesProcessed)} строк обработано, ${formatNumber(msg.linesParsed)} распознано`
           );
+          if (msg.totalFiles > 1) {
+            setFileProgress(`Файл ${msg.filesProcessed + 1} из ${msg.totalFiles}: ${msg.currentFile}`);
+          } else {
+            setFileProgress(msg.currentFile || "");
+          }
         } else if (msg.type === "done") {
-          const analytics = msg.analytics;
+          const a = msg.analytics;
           const sessionData: AnalyticsData = {
-            session: analytics.sessionMeta,
-            summary: analytics.summary,
-            statusCodes: analytics.statusCodes,
-            userAgents: analytics.userAgents,
-            botCrawl: analytics.botCrawl,
-            topUrls: analytics.topUrls,
-            hourly: analytics.hourly,
-            statusByBot: analytics.statusByBot,
-            dailyBots: analytics.dailyBots || [],
-            trackedBotsPresent: analytics.trackedBotsPresent || [],
+            session: a.sessionMeta,
+            summary: a.summary,
+            statusCodes: a.statusCodes,
+            userAgents: a.userAgents,
+            botCrawl: a.botCrawl,
+            topUrls: a.topUrls,
+            hourly: a.hourly,
+            statusByBot: a.statusByBot,
+            dailyBots: a.dailyBots || [],
+            trackedBotsPresent: a.trackedBotsPresent || [],
+            details: a.details || [],
+            botErrors: a.botErrors || [],
+            detailsTruncated: !!a.detailsTruncated,
           };
 
           if (sessionData.session.parsedLines === 0) {
@@ -81,7 +92,6 @@ export default function UploadPage() {
           });
           setStatus("done");
           worker.terminate();
-
           setTimeout(() => setLocation(`/dashboard/${sessionData.session.id}`), 800);
         } else if (msg.type === "error") {
           setStatus("error");
@@ -96,8 +106,7 @@ export default function UploadPage() {
         worker.terminate();
       };
 
-      // Send file to worker (transferable — zero-copy)
-      worker.postMessage({ file, filename: file.name });
+      worker.postMessage({ files, sessionName });
     },
     [addAnalytics, setLocation],
   );
@@ -106,25 +115,29 @@ export default function UploadPage() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragActive(false);
-      const file = e.dataTransfer.files?.[0];
-      if (file) processFile(file);
+      const files = Array.from(e.dataTransfer.files || []);
+      if (files.length > 0) processFiles(files);
     },
-    [processFile],
+    [processFiles],
   );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) processFiles(files);
   };
 
-  const isProcessing = status === "reading" || status === "parsing";
+  const removeFile = (index: number) => {
+    setSelectedFiles(selectedFiles.filter((_, i) => i !== index));
+  };
+
+  const isProcessing = status === "parsing";
 
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-4rem)] p-6">
       <div className="w-full max-w-xl space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-xl font-semibold tracking-tight" data-testid="text-page-title">
-            Загрузка лог-файла
+            Загрузка лог-файлов
           </h1>
           <p className="text-sm text-muted-foreground">
             Поддерживаются Nginx и Apache access logs (combined формат).
@@ -132,11 +145,22 @@ export default function UploadPage() {
           </p>
         </div>
 
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/40 border text-xs text-muted-foreground">
+          <Info className="w-4 h-4 mt-0.5 shrink-0 text-primary" />
+          <div className="space-y-1">
+            <div className="font-medium text-foreground">Можно загружать несколько файлов</div>
+            <div>
+              Например, по одному файлу на каждый день — все данные объединятся в одну сессию анализа.
+              Выделите файлы в проводнике или перетащите сразу несколько.
+            </div>
+          </div>
+        </div>
+
         <Card className="border-dashed">
           <CardContent className="p-0">
             <div
               className={`
-                relative flex flex-col items-center justify-center gap-4 p-12 rounded-lg cursor-pointer
+                relative flex flex-col items-center justify-center gap-4 p-10 rounded-lg cursor-pointer
                 transition-colors duration-150
                 ${dragActive ? "bg-accent" : "hover:bg-muted/50"}
                 ${isProcessing ? "pointer-events-none opacity-60" : ""}
@@ -151,6 +175,7 @@ export default function UploadPage() {
                 id="file-input"
                 type="file"
                 accept=".log,.txt,.gz"
+                multiple
                 className="hidden"
                 onChange={handleFileSelect}
                 data-testid="input-file"
@@ -161,20 +186,19 @@ export default function UploadPage() {
                   <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                     <FileText className="w-5 h-5 text-primary animate-pulse" />
                   </div>
-                  <div className="text-sm font-medium">
-                    Анализ логов...
-                  </div>
+                  <div className="text-sm font-medium">Анализ логов...</div>
                   <Progress value={progress} className="w-full max-w-xs h-1.5" />
-                  <div className="text-center">
-                    {selectedFileName && (
-                      <div className="text-xs text-muted-foreground tabular-nums">
-                        {selectedFileName} · {formatSize(selectedFileSize)}
+                  <div className="text-center space-y-0.5">
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                      {selectedFiles.length} {selectedFiles.length === 1 ? "файл" : "файлов"} · {formatSize(totalSize)}
+                    </div>
+                    {fileProgress && (
+                      <div className="text-xs text-muted-foreground truncate max-w-xs" title={fileProgress}>
+                        {fileProgress}
                       </div>
                     )}
                     {linesInfo && (
-                      <div className="text-xs text-muted-foreground tabular-nums mt-1">
-                        {linesInfo}
-                      </div>
+                      <div className="text-xs text-muted-foreground tabular-nums">{linesInfo}</div>
                     )}
                   </div>
                 </div>
@@ -183,7 +207,7 @@ export default function UploadPage() {
                   <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center">
                     <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
                   </div>
-                  <div className="text-sm font-medium">Файл обработан</div>
+                  <div className="text-sm font-medium">Файлы обработаны</div>
                   <div className="text-xs text-muted-foreground tabular-nums">
                     {formatNumber(result.parsedLines)} из {formatNumber(result.totalLines)} строк
                   </div>
@@ -195,9 +219,9 @@ export default function UploadPage() {
                   </div>
                   <div className="text-center space-y-1">
                     <p className="text-sm font-medium">
-                      Перетащите файл сюда или нажмите для выбора
+                      Перетащите файлы сюда или нажмите для выбора
                     </p>
-                    <p className="text-xs text-muted-foreground">.log, .txt — до 1 ГБ</p>
+                    <p className="text-xs text-muted-foreground">.log, .txt · несколько файлов</p>
                   </div>
                 </>
               )}

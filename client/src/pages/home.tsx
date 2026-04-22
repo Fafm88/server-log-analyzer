@@ -8,7 +8,6 @@ import {
 import {
   Upload, FileText, Trash2, BarChart3, Server,
 } from "lucide-react";
-import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { useLogStore } from "@/lib/log-store";
 
 export default function HomePage() {
@@ -130,7 +129,6 @@ export default function HomePage() {
           </Card>
         )}
 
-        <PerplexityAttribution />
       </div>
     </div>
   );

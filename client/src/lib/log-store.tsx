@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 
-// Lightweight session metadata — no entries stored
 export interface SessionMeta {
   id: string;
   filename: string;
@@ -8,6 +7,32 @@ export interface SessionMeta {
   totalLines: number;
   parsedLines: number;
   uploadedAt: string;
+}
+
+export interface UserAgentRow {
+  userAgent: string;
+  botName: string | null;
+  isBot: boolean;
+  count: number;
+  statusCounts: Record<string, number>;
+  topUrl: string;
+  topUrlCount: number;
+}
+
+export interface DetailRow {
+  userAgent: string;
+  botName: string | null;
+  isBot: boolean;
+  url: string;
+  statusCode: number;
+  count: number;
+}
+
+export interface BotErrorRow {
+  botName: string;
+  url: string;
+  statusCode: number;
+  count: number;
 }
 
 export interface AnalyticsData {
@@ -20,13 +45,16 @@ export interface AnalyticsData {
     statusGroups: Record<string, number>;
   };
   statusCodes: { statusCode: number; count: number }[];
-  userAgents: { userAgent: string; botName: string | null; isBot: boolean; count: number }[];
+  userAgents: UserAgentRow[];
   botCrawl: { botName: string; count: number; urls: number; errors: number }[];
   topUrls: { url: string; count: number; avgStatus: number }[];
   hourly: { hour: string; total: number; bots: number }[];
   statusByBot: { botName: string; statusCode: number; count: number }[];
   dailyBots: { date: string; counts: Record<string, number>; total: number }[];
   trackedBotsPresent: string[];
+  details: DetailRow[];
+  botErrors: BotErrorRow[];
+  detailsTruncated: boolean;
 }
 
 interface LogStore {
