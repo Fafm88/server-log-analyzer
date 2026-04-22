@@ -73,6 +73,7 @@ export default function UploadPage() {
             details: a.details || [],
             botErrors: a.botErrors || [],
             detailsTruncated: !!a.detailsTruncated,
+            botIps: a.botIps || [],
           };
 
           if (sessionData.session.parsedLines === 0) {

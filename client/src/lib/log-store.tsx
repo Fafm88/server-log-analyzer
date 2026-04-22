@@ -35,6 +35,12 @@ export interface BotErrorRow {
   count: number;
 }
 
+export interface BotIpsEntry {
+  botName: string;
+  ipCount: number;
+  ips: string[];
+}
+
 export interface AnalyticsData {
   session: SessionMeta;
   summary: {
@@ -55,6 +61,7 @@ export interface AnalyticsData {
   details: DetailRow[];
   botErrors: BotErrorRow[];
   detailsTruncated: boolean;
+  botIps: BotIpsEntry[];
 }
 
 interface LogStore {

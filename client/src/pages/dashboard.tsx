@@ -1,5 +1,5 @@
 import { useRoute, useLocation } from "wouter";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,17 @@ import {
 } from "recharts";
 import {
   Bot, Globe, AlertTriangle, Activity, ArrowLeft, FileText, Search,
-  Download, TrendingUp, ListFilter, BugOff, X,
+  Download, TrendingUp, ListFilter, BugOff, X, ShieldCheck, Loader2,
 } from "lucide-react";
 import { useLogStore } from "@/lib/log-store";
-import type { UserAgentRow, DetailRow, BotErrorRow } from "@/lib/log-store";
+import type { UserAgentRow, DetailRow, BotErrorRow, BotIpsEntry } from "@/lib/log-store";
 import { VirtualTable, type VirtualColumn } from "@/components/VirtualTable";
+import { BotVerifyBadge } from "@/components/BotVerifyBadge";
 import { downloadCSV } from "@/lib/csv";
+import {
+  verifyBotIps, badgeForBot,
+  type BotVerificationResult, type BotBadge, VERIFIABLE_BOTS,
+} from "@/lib/bot-verifier";
 
 // ==========================================================
 // Design tokens
@@ -168,7 +173,41 @@ export default function DashboardPage() {
   const {
     session, summary, statusCodes, botCrawl, topUrls, hourly, statusByBot,
     userAgents, dailyBots, trackedBotsPresent, details, botErrors, detailsTruncated,
+    botIps,
   } = data;
+
+  // ----------------------------------------------------
+  // Bot verification state (runs on user demand via button)
+  // ----------------------------------------------------
+  const [verifyState, setVerifyState] = useState<
+    | { phase: "idle" }
+    | { phase: "running"; done: number; total: number }
+    | { phase: "done"; results: BotVerificationResult[] }
+    | { phase: "error"; message: string }
+  >({ phase: "idle" });
+
+  const verifyResults = verifyState.phase === "done" ? verifyState.results : null;
+
+  const startVerify = useCallback(async () => {
+    if (!botIps || botIps.length === 0) return;
+    const verifiableEntries = botIps.filter((b) => VERIFIABLE_BOTS.has(b.botName));
+    if (verifiableEntries.length === 0) return;
+    const total = verifiableEntries.reduce((s, b) => s + b.ips.length, 0);
+    setVerifyState({ phase: "running", done: 0, total });
+    try {
+      const results = await verifyBotIps(verifiableEntries, (done, t) =>
+        setVerifyState({ phase: "running", done, total: t }));
+      setVerifyState({ phase: "done", results });
+    } catch (e: any) {
+      setVerifyState({ phase: "error", message: e?.message || "Ошибка проверки" });
+    }
+  }, [botIps]);
+
+  // Helper: look up badge for a bot — used throughout the dashboard
+  const getBadge = useCallback(
+    (botName: string): BotBadge => badgeForBot(botName, verifyResults),
+    [verifyResults],
+  );
 
   const statusGroupData = Object.entries(summary.statusGroups).map(([k, v]) => ({
     name: k, value: v as number,
@@ -321,10 +360,20 @@ export default function DashboardPage() {
             <TabsTrigger value="errors" data-testid="tab-errors">
               <BugOff className="w-3.5 h-3.5 mr-1.5" />Ошибки ботов
             </TabsTrigger>
+            <TabsTrigger value="verify" data-testid="tab-verify">
+              <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />Верификация
+            </TabsTrigger>
             <TabsTrigger value="urls" data-testid="tab-urls">
               <Globe className="w-3.5 h-3.5 mr-1.5" />Топ URL
             </TabsTrigger>
           </TabsList>
+
+          {/* Global verification banner — visible while data loaded but not verified yet */}
+          <VerifyBanner
+            state={verifyState}
+            botIps={botIps}
+            onStart={startVerify}
+          />
 
           {/* ================================================ */}
           {/* Crawl tab — daily chart + bot activity + hourly */}
@@ -449,7 +498,12 @@ export default function DashboardPage() {
                       <TableBody>
                         {Object.entries(botStatusMap).map(([bot, codes]) => (
                           <TableRow key={bot}>
-                            <TableCell className="text-xs font-medium">{bot}</TableCell>
+                            <TableCell className="text-xs font-medium">
+                              <span className="inline-flex items-center gap-1.5">
+                                <BotVerifyBadge badge={getBadge(bot)} botName={bot} />
+                                {bot}
+                              </span>
+                            </TableCell>
                             <TableCell className="text-xs text-right tabular-nums text-green-600 dark:text-green-400">
                               {codes["2xx"]?.toLocaleString("ru-RU") || "—"}
                             </TableCell>
@@ -550,8 +604,11 @@ export default function DashboardPage() {
                         {botTrends.map((t) => (
                           <TableRow key={t.bot}>
                             <TableCell className="text-xs">
-                              <span className="font-medium" style={{ color: getBotColor(t.bot) }}>
-                                {t.bot}
+                              <span className="inline-flex items-center gap-1.5">
+                                <BotVerifyBadge badge={getBadge(t.bot)} botName={t.bot} />
+                                <span className="font-medium" style={{ color: getBotColor(t.bot) }}>
+                                  {t.bot}
+                                </span>
                               </span>
                             </TableCell>
                             <TableCell className="text-xs text-right tabular-nums text-muted-foreground">
@@ -674,21 +731,37 @@ export default function DashboardPage() {
           {/* User-Agents tab — full list + filters + CSV       */}
           {/* ================================================ */}
           <TabsContent value="agents" className="space-y-4">
-            <UserAgentsView userAgents={userAgents} totalRequests={summary.totalRequests} />
+            <UserAgentsView
+              userAgents={userAgents}
+              totalRequests={summary.totalRequests}
+              getBadge={getBadge}
+            />
           </TabsContent>
 
           {/* ================================================ */}
           {/* Details tab — UA × URL × status + filters         */}
           {/* ================================================ */}
           <TabsContent value="details" className="space-y-4">
-            <DetailsView details={details} detailsTruncated={detailsTruncated} />
+            <DetailsView
+              details={details}
+              detailsTruncated={detailsTruncated}
+              getBadge={getBadge}
+            />
           </TabsContent>
 
           {/* ================================================ */}
           {/* Bot errors tab                                    */}
           {/* ================================================ */}
           <TabsContent value="errors" className="space-y-4">
-            <BotErrorsView botErrors={botErrors} />
+            <BotErrorsView botErrors={botErrors} getBadge={getBadge} />
+          </TabsContent>
+
+          <TabsContent value="verify" className="space-y-4">
+            <VerifyView
+              state={verifyState}
+              botIps={botIps}
+              onStart={startVerify}
+            />
           </TabsContent>
 
           {/* ================================================ */}
@@ -759,8 +832,9 @@ export default function DashboardPage() {
 // ==========================================================
 // User-Agents view — all rows, filterable, exportable
 // ==========================================================
-function UserAgentsView({ userAgents, totalRequests }: {
+function UserAgentsView({ userAgents, totalRequests, getBadge }: {
   userAgents: UserAgentRow[]; totalRequests: number;
+  getBadge: (botName: string) => BotBadge;
 }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all"); // all, bots, humans, or specific botName
@@ -809,11 +883,14 @@ function UserAgentsView({ userAgents, totalRequests }: {
       ),
     },
     {
-      key: "type", header: "Тип", width: "140px",
+      key: "type", header: "Тип", width: "160px",
       cell: (row) => row.isBot ? (
-        <Badge variant="outline" className="text-[10px] h-5 px-1.5">
-          <Bot className="w-2.5 h-2.5 mr-1" />{row.botName || "Бот"}
-        </Badge>
+        <span className="inline-flex items-center gap-1.5">
+          {row.botName && <BotVerifyBadge badge={getBadge(row.botName)} botName={row.botName} />}
+          <Badge variant="outline" className="text-[10px] h-5 px-1.5">
+            <Bot className="w-2.5 h-2.5 mr-1" />{row.botName || "Бот"}
+          </Badge>
+        </span>
       ) : (
         <span className="text-muted-foreground text-xs">Пользователь</span>
       ),
@@ -992,8 +1069,9 @@ function UserAgentsView({ userAgents, totalRequests }: {
 // ==========================================================
 // Details view — UA × URL × status code
 // ==========================================================
-function DetailsView({ details, detailsTruncated }: {
+function DetailsView({ details, detailsTruncated, getBadge }: {
   details: DetailRow[]; detailsTruncated: boolean;
+  getBadge: (botName: string) => BotBadge;
 }) {
   const [uaSearch, setUaSearch] = useState("");
   const [urlSearch, setUrlSearch] = useState("");
@@ -1044,11 +1122,14 @@ function DetailsView({ details, detailsTruncated }: {
       cell: (row) => <StatusBadge code={row.statusCode} />,
     },
     {
-      key: "type", header: "Тип", width: "140px",
+      key: "type", header: "Тип", width: "160px",
       cell: (row) => row.isBot ? (
-        <Badge variant="outline" className="text-[10px] h-5 px-1.5">
-          <Bot className="w-2.5 h-2.5 mr-1" />{row.botName || "Бот"}
-        </Badge>
+        <span className="inline-flex items-center gap-1.5">
+          {row.botName && <BotVerifyBadge badge={getBadge(row.botName)} botName={row.botName} />}
+          <Badge variant="outline" className="text-[10px] h-5 px-1.5">
+            <Bot className="w-2.5 h-2.5 mr-1" />{row.botName || "Бот"}
+          </Badge>
+        </span>
       ) : (
         <span className="text-muted-foreground text-xs">Пользователь</span>
       ),
@@ -1208,7 +1289,10 @@ function DetailsView({ details, detailsTruncated }: {
 // ==========================================================
 // Bot errors view
 // ==========================================================
-function BotErrorsView({ botErrors }: { botErrors: BotErrorRow[] }) {
+function BotErrorsView({ botErrors, getBadge }: {
+  botErrors: BotErrorRow[];
+  getBadge: (botName: string) => BotBadge;
+}) {
   const [urlSearch, setUrlSearch] = useState("");
   const [botFilter, setBotFilter] = useState<string>("all");
   const [codeFilter, setCodeFilter] = useState<string>("all");
@@ -1254,10 +1338,13 @@ function BotErrorsView({ botErrors }: { botErrors: BotErrorRow[] }) {
       cell: (row) => <StatusBadge code={row.statusCode} />,
     },
     {
-      key: "bot", header: "Бот", width: "150px",
+      key: "bot", header: "Бот", width: "170px",
       cell: (row) => (
-        <span className="text-xs font-medium" style={{ color: getBotColor(row.botName) }}>
-          {row.botName}
+        <span className="inline-flex items-center gap-1.5">
+          <BotVerifyBadge badge={getBadge(row.botName)} botName={row.botName} />
+          <span className="text-xs font-medium" style={{ color: getBotColor(row.botName) }}>
+            {row.botName}
+          </span>
         </span>
       ),
     },
@@ -1364,5 +1451,369 @@ function BotErrorsView({ botErrors }: { botErrors: BotErrorRow[] }) {
         />
       </CardContent>
     </Card>
+  );
+}
+
+// ==========================================================
+// Verify banner — compact CTA shown above tabs
+// ==========================================================
+type VerifyPhase =
+  | { phase: "idle" }
+  | { phase: "running"; done: number; total: number }
+  | { phase: "done"; results: BotVerificationResult[] }
+  | { phase: "error"; message: string };
+
+function VerifyBanner({ state, botIps, onStart }: {
+  state: VerifyPhase;
+  botIps: BotIpsEntry[];
+  onStart: () => void;
+}) {
+  const verifiable = botIps.filter((b) => VERIFIABLE_BOTS.has(b.botName));
+  if (verifiable.length === 0) return null;
+
+  if (state.phase === "idle") {
+    const totalIps = verifiable.reduce((s, b) => s + b.ips.length, 0);
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+        <ShieldCheck className="w-4 h-4 text-primary shrink-0" />
+        <div className="text-xs flex-1">
+          <div className="font-medium text-foreground">Проверить подлинность ботов</div>
+          <div className="text-muted-foreground">
+            В логе найдено {verifiable.length} {verifiable.length === 1 ? "поисковых бота" : "поисковых ботов"}.
+            Можем проверить их настоящие IP через DNS-over-HTTPS ({totalIps} {totalIps === 1 ? "IP" : "IP"}).
+          </div>
+        </div>
+        <Button size="sm" className="h-8 text-xs shrink-0" onClick={onStart} data-testid="button-verify-start">
+          Проверить
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.phase === "running") {
+    const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+        <Loader2 className="w-4 h-4 text-primary animate-spin shrink-0" />
+        <div className="text-xs flex-1">
+          <div className="font-medium">Проверка ботов… {pct}%</div>
+          <div className="text-muted-foreground tabular-nums">
+            {state.done.toLocaleString("ru-RU")} из {state.total.toLocaleString("ru-RU")} IP
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.phase === "error") {
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg border bg-destructive/10 text-destructive">
+        <AlertTriangle className="w-4 h-4 shrink-0" />
+        <div className="text-xs flex-1">Ошибка проверки: {state.message}</div>
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onStart}>
+          Повторить
+        </Button>
+      </div>
+    );
+  }
+
+  // done — show summary
+  const totalFake = state.results.reduce((s, r) => s + r.fake, 0);
+  const totalVerified = state.results.reduce((s, r) => s + r.verified, 0);
+  const totalChecked = state.results.reduce((s, r) => s + r.ipsChecked, 0);
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+      <ShieldCheck className={`w-4 h-4 shrink-0 ${
+        totalFake > 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"
+      }`} />
+      <div className="text-xs flex-1">
+        <div className="font-medium">Проверка завершена</div>
+        <div className="text-muted-foreground">
+          Настоящих: <span className="font-medium text-green-600 dark:text-green-400">{totalVerified}</span> ·
+          {" "}Поддельных: <span className="font-medium text-red-600 dark:text-red-400">{totalFake}</span> ·
+          {" "}Всего IP: <span className="tabular-nums">{totalChecked.toLocaleString("ru-RU")}</span>
+          {" "}· Подробности — на вкладке «Верификация».
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================
+// Verify view — full per-bot report and per-IP breakdown
+// ==========================================================
+function VerifyView({ state, botIps, onStart }: {
+  state: VerifyPhase;
+  botIps: BotIpsEntry[];
+  onStart: () => void;
+}) {
+  const verifiable = botIps.filter((b) => VERIFIABLE_BOTS.has(b.botName));
+
+  if (verifiable.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center text-sm text-muted-foreground">
+          В логе не найдено поисковых ботов Google или Яндекса — проверять нечего.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (state.phase !== "done") {
+    // Idle / running / error — show explanation + CTA
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            Верификация ботов
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="text-sm text-muted-foreground space-y-2 max-w-2xl">
+            <p>
+              Любой парсер может представиться Googlebot или YandexBot. Чтобы отличить
+              настоящего поискового бота от подделки, поисковики рекомендуют проверку
+              через обратный DNS-запрос и прямой DNS-запрос обратно к IP.
+            </p>
+            <p>
+              У настоящего Googlebot reverse DNS заканчивается на{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">.googlebot.com</code>,{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">.google.com</code> или{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">.googleusercontent.com</code>.
+              У Яндекса —{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">.yandex.ru</code>,{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">.yandex.net</code> или{" "}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">.yandex.com</code>.
+            </p>
+            <p className="text-xs">
+              Проверка использует DNS-over-HTTPS (Cloudflare 1.1.1.1) — из ваших логов
+              уходят только IP-адреса для DNS-запросов. Сами логи, URL и User-Agent
+              остаются в браузере.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 rounded-lg border bg-card">
+              <div className="text-xs text-muted-foreground">Ботов на проверку</div>
+              <div className="text-lg font-semibold tabular-nums">{verifiable.length}</div>
+            </div>
+            <div className="p-3 rounded-lg border bg-card">
+              <div className="text-xs text-muted-foreground">Уникальных IP</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {verifiable.reduce((s, b) => s + b.ipCount, 0).toLocaleString("ru-RU")}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg border bg-card">
+              <div className="text-xs text-muted-foreground">К проверке</div>
+              <div className="text-lg font-semibold tabular-nums">
+                {verifiable.reduce((s, b) => s + b.ips.length, 0).toLocaleString("ru-RU")}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg border bg-card">
+              <div className="text-xs text-muted-foreground">Метод</div>
+              <div className="text-sm font-semibold">DoH (Cloudflare)</div>
+            </div>
+          </div>
+
+          {state.phase === "idle" && (
+            <Button onClick={onStart} data-testid="button-verify-start-tab">
+              <ShieldCheck className="w-4 h-4 mr-2" />Начать проверку
+            </Button>
+          )}
+          {state.phase === "running" && (
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              <div className="text-sm tabular-nums">
+                {state.done.toLocaleString("ru-RU")} из {state.total.toLocaleString("ru-RU")} IP
+                ({state.total > 0 ? Math.round((state.done / state.total) * 100) : 0}%)
+              </div>
+            </div>
+          )}
+          {state.phase === "error" && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-destructive">Ошибка: {state.message}</span>
+              <Button size="sm" onClick={onStart}>Повторить</Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Done — summary per bot + details
+  const results = state.results;
+  const totalVerified = results.reduce((s, r) => s + r.verified, 0);
+  const totalFake = results.reduce((s, r) => s + r.fake, 0);
+  const totalUnver = results.reduce((s, r) => s + r.unverifiable, 0);
+  const totalErrors = results.reduce((s, r) => s + r.errors, 0);
+  const totalChecked = results.reduce((s, r) => s + r.ipsChecked, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary card */}
+      <Card>
+        <CardHeader className="pb-2 flex flex-row items-start justify-between space-y-0">
+          <div>
+            <CardTitle className="text-sm font-medium">Итог проверки</CardTitle>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Проверено {totalChecked.toLocaleString("ru-RU")} IP по {results.length} ботам через DNS-over-HTTPS
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => {
+              const flat = results.flatMap((r) =>
+                r.details.map((d) => ({
+                  bot: r.botName,
+                  ip: d.ip,
+                  status: d.status,
+                  ptr: d.ptr || "",
+                  reason: d.reason || "",
+                }))
+              );
+              downloadCSV("bot-verification", flat, [
+                { key: "bot", label: "Бот" },
+                { key: "ip", label: "IP" },
+                { key: "status", label: "Статус" },
+                { key: "ptr", label: "PTR" },
+                { key: "reason", label: "Причина" },
+              ]);
+            }}
+            data-testid="button-export-verify"
+          >
+            <Download className="w-3.5 h-3.5 mr-1.5" />Экспорт CSV
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <VerifyStat label="Настоящие" value={totalVerified} color="text-green-600 dark:text-green-400" />
+            <VerifyStat label="Поддельные" value={totalFake} color="text-red-600 dark:text-red-400" />
+            <VerifyStat label="Нельзя проверить" value={totalUnver} color="text-muted-foreground" />
+            <VerifyStat label="Ошибки сети" value={totalErrors} color="text-amber-600 dark:text-amber-400" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Per-bot breakdown */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">По каждому боту</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Бот</TableHead>
+                <TableHead className="text-xs text-right">Всего IP</TableHead>
+                <TableHead className="text-xs text-right">Проверено</TableHead>
+                <TableHead className="text-xs text-right text-green-700 dark:text-green-400">Настоящих</TableHead>
+                <TableHead className="text-xs text-right text-red-700 dark:text-red-400">Поддельных</TableHead>
+                <TableHead className="text-xs text-right text-muted-foreground">Без PTR</TableHead>
+                <TableHead className="text-xs text-right text-amber-700 dark:text-amber-400">Ошибки</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {results.map((r) => {
+                const badge: BotBadge = r.fake > 0 && r.verified === 0
+                  ? "fake"
+                  : r.fake > 0 ? "partial"
+                  : r.verified > 0 ? "verified"
+                  : "unverifiable";
+                return (
+                  <TableRow key={r.botName}>
+                    <TableCell className="text-xs">
+                      <span className="inline-flex items-center gap-1.5">
+                        <BotVerifyBadge badge={badge} botName={r.botName} />
+                        <span className="font-medium" style={{ color: getBotColor(r.botName) }}>
+                          {r.botName}
+                        </span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums">{r.ipsTotal.toLocaleString("ru-RU")}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums">{r.ipsChecked.toLocaleString("ru-RU")}</TableCell>
+                    <TableCell className="text-xs text-right tabular-nums text-green-600 dark:text-green-400">
+                      {r.verified > 0 ? r.verified.toLocaleString("ru-RU") : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums text-red-600 dark:text-red-400">
+                      {r.fake > 0 ? r.fake.toLocaleString("ru-RU") : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums text-muted-foreground">
+                      {r.unverifiable > 0 ? r.unverifiable.toLocaleString("ru-RU") : "—"}
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums text-amber-600 dark:text-amber-400">
+                      {r.errors > 0 ? r.errors.toLocaleString("ru-RU") : "—"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Detail rows — show fake IPs prominently */}
+      {totalFake > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400" />
+              Поддельные IP
+            </CardTitle>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              IP-адреса, которые выдают себя за поисковых ботов, но не прошли DNS-проверку.
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[360px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Бот (объявлен)</TableHead>
+                    <TableHead className="text-xs">IP</TableHead>
+                    <TableHead className="text-xs">PTR</TableHead>
+                    <TableHead className="text-xs">Причина</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {results.flatMap((r) =>
+                    r.details
+                      .filter((d) => d.status === "fake")
+                      .map((d, i) => (
+                        <TableRow key={`${r.botName}-${d.ip}-${i}`}>
+                          <TableCell className="text-xs font-medium">{r.botName}</TableCell>
+                          <TableCell className="text-xs font-mono">{d.ip}</TableCell>
+                          <TableCell className="text-xs font-mono text-muted-foreground">
+                            {d.ptr || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground max-w-[400px]">
+                            {d.reason || "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function VerifyStat({ label, value, color }: {
+  label: string; value: number; color: string;
+}) {
+  return (
+    <div className="p-3 rounded-lg border bg-card">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${color}`}>
+        {value.toLocaleString("ru-RU")}
+      </div>
+    </div>
   );
 }

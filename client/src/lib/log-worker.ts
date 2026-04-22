@@ -33,6 +33,13 @@ export interface BotErrorRow {
   count: number;
 }
 
+// IPs per bot — used for bot authenticity verification
+export interface BotIpsEntry {
+  botName: string;
+  ipCount: number;    // total unique IPs seen for this bot
+  ips: string[];      // sample of IPs (capped, ordered by request count desc)
+}
+
 export interface WorkerAnalytics {
   sessionMeta: {
     id: string;
@@ -61,6 +68,8 @@ export interface WorkerAnalytics {
   details: DetailRow[]; // UA × URL × statusCode (capped)
   botErrors: BotErrorRow[]; // errors (>=400) only, all bots
   detailsTruncated: boolean; // true if detail cap was hit
+  // IPs per bot (for verification) — only for bots that claim to be search engines
+  botIps: BotIpsEntry[];
 }
 
 // =============================================
@@ -199,6 +208,10 @@ class StreamingAggregator {
   // Bot errors: `${botName}|${url}|${status}` -> count
   botErrorMap = new Map<string, number>();
 
+  // IPs per bot (only for verifiable search-engine bots):
+  // botName -> (ip -> request count) so we can sort by frequency
+  botIpMap = new Map<string, Map<string, number>>();
+
   // Caps to protect against OOM on pathological 1 GB inputs
   private readonly MAX_UA = 50000;
   private readonly MAX_URLS = 200000;
@@ -206,6 +219,7 @@ class StreamingAggregator {
   private readonly MAX_URLS_PER_UA = 200;
   private readonly MAX_DETAIL_ROWS = 300000;
   private readonly MAX_BOT_ERRORS = 50000;
+  private readonly MAX_IPS_PER_BOT = 200; // verify up to N most-active IPs per bot
 
   addLine(line: string): void {
     this.totalLines++;
@@ -215,6 +229,7 @@ class StreamingAggregator {
     this.parsedLines++;
     this.totalRequests++;
 
+    const ip = m[1] || "";
     const statusCode = parseInt(m[6], 10);
     const userAgent = m[9] || "";
     const url = m[4] || "/";
@@ -268,6 +283,16 @@ class StreamingAggregator {
       if (!this.statusByBotMap.has(bot.botName)) this.statusByBotMap.set(bot.botName, new Map());
       const inner = this.statusByBotMap.get(bot.botName)!;
       inner.set(statusCode, (inner.get(statusCode) || 0) + 1);
+
+      // Collect IPs for verifiable search-engine bots
+      if (ip && isVerifiable(bot.botName)) {
+        let ipCounts = this.botIpMap.get(bot.botName);
+        if (!ipCounts) {
+          ipCounts = new Map();
+          this.botIpMap.set(bot.botName, ipCounts);
+        }
+        ipCounts.set(ip, (ipCounts.get(ip) || 0) + 1);
+      }
 
       if (TRACKED_SET.has(bot.botName)) {
         this.trackedPresent.add(bot.botName);
@@ -436,6 +461,19 @@ class StreamingAggregator {
     }
     botErrors.sort((a, b) => b.count - a.count);
 
+    // Bot IPs per verifiable bot
+    const botIps: BotIpsEntry[] = [];
+    for (const [botName, ipCounts] of this.botIpMap) {
+      const sorted = Array.from(ipCounts.entries())
+        .sort((a, b) => b[1] - a[1]);
+      botIps.push({
+        botName,
+        ipCount: sorted.length,
+        ips: sorted.slice(0, this.MAX_IPS_PER_BOT).map(([ip]) => ip),
+      });
+    }
+    botIps.sort((a, b) => b.ipCount - a.ipCount);
+
     const id = typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -467,8 +505,27 @@ class StreamingAggregator {
       details,
       botErrors,
       detailsTruncated: this.detailsTruncated,
+      botIps,
     };
   }
+}
+
+// =============================================
+// Verifiable bots (via reverse + forward DNS)
+// =============================================
+export const VERIFIABLE_BOTS = new Set([
+  // Google family
+  "Googlebot", "Googlebot-Image", "Googlebot-Video", "Googlebot-News",
+  "Google-Extended", "AdsBot-Google", "Mediapartners-Google",
+  "APIs-Google", "GoogleOther", "Storebot-Google", "Google-InspectionTool",
+  // Yandex family
+  "YandexBot", "YandexAdditionalBot", "YandexImages", "YandexMedia",
+  "YandexMetrika", "YandexDirect", "YandexMobileBot",
+  "YandexWebmaster", "YandexPagechecker", "YandexAccessibilityBot",
+]);
+
+function isVerifiable(botName: string): boolean {
+  return VERIFIABLE_BOTS.has(botName);
 }
 
 // =============================================
