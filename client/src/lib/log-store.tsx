@@ -25,6 +25,8 @@ export interface AnalyticsData {
   topUrls: { url: string; count: number; avgStatus: number }[];
   hourly: { hour: string; total: number; bots: number }[];
   statusByBot: { botName: string; statusCode: number; count: number }[];
+  dailyBots: { date: string; counts: Record<string, number>; total: number }[];
+  trackedBotsPresent: string[];
 }
 
 interface LogStore {

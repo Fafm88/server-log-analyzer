@@ -11,6 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, CartesianGrid, Legend,
 } from "recharts";
+import { useMemo } from "react";
 import {
   Bot, Globe, AlertTriangle, Activity, ArrowLeft, FileText, Search,
 } from "lucide-react";
@@ -34,6 +35,38 @@ const STATUS_COLORS: Record<string, string> = {
   "4xx": "hsl(38, 92%, 50%)",
   "5xx": "hsl(0, 72%, 51%)",
 };
+
+// Stable color palette for tracked bots — each bot always gets the same color.
+// Ordered to group AI bots warmly and search bots coolly.
+const BOT_COLORS: Record<string, string> = {
+  // OpenAI — green/teal family
+  "GPTBot": "#15803d",
+  "ChatGPT-User": "#16a34a",
+  "OAI-SearchBot": "#5eead4",
+  // Anthropic — amber/gold
+  "ClaudeBot": "#d97706",
+  "Claude-User": "#f59e0b",
+  "Claude-SearchBot": "#fcd34d",
+  // Perplexity — purple
+  "PerplexityBot": "#7c3aed",
+  "Perplexity-User": "#a78bfa",
+  // Google — blue
+  "Googlebot": "#1d4ed8",
+  "Google-Extended": "#60a5fa",
+  // Bing — cyan
+  "bingbot": "#0891b2",
+  // Yandex — red
+  "YandexBot": "#dc2626",
+  "YandexAdditionalBot": "#f87171",
+  // Others
+  "DeepSeekBot": "#475569",
+  "Bytespider": "#ea580c",
+  "CCBot": "#334155",
+};
+
+function getBotColor(name: string, fallbackIndex = 0) {
+  return BOT_COLORS[name] || CHART_COLORS[fallbackIndex % CHART_COLORS.length];
+}
 
 function KpiCard({ icon: Icon, label, value, sub, variant }: {
   icon: any; label: string; value: string | number; sub?: string;
@@ -84,6 +117,45 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
+// Tooltip for the stacked daily bot chart — sorts bots by count desc,
+// hides zero entries, shows total at bottom.
+function DailyBotsTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const rows = payload
+    .filter((p: any) => p.value > 0)
+    .sort((a: any, b: any) => b.value - a.value);
+  const total = rows.reduce((s: number, r: any) => s + (r.value || 0), 0);
+  return (
+    <div className="bg-popover border rounded-md px-3 py-2 shadow-lg text-xs min-w-[200px]">
+      <div className="font-semibold mb-1.5 tabular-nums">{label}</div>
+      <div className="space-y-1">
+        {rows.map((p: any, i: number) => (
+          <div key={i} className="flex items-center gap-2 justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="w-2.5 h-2.5 rounded-sm shrink-0"
+                style={{ background: p.color }}
+              />
+              <span className="truncate" style={{ color: p.color }}>{p.name}</span>
+            </div>
+            <span className="font-semibold tabular-nums ml-2">
+              {Number(p.value).toLocaleString("ru-RU")}
+            </span>
+          </div>
+        ))}
+      </div>
+      {rows.length > 1 && (
+        <div className="mt-2 pt-1.5 border-t flex items-center justify-between">
+          <span className="text-muted-foreground">Всего</span>
+          <span className="font-semibold tabular-nums">
+            {total.toLocaleString("ru-RU")}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [, params] = useRoute("/dashboard/:id");
   const [, setLocation] = useLocation();
@@ -104,7 +176,7 @@ export default function DashboardPage() {
     );
   }
 
-  const { session, summary, statusCodes, botCrawl, topUrls, hourly, statusByBot, userAgents } = data;
+  const { session, summary, statusCodes, botCrawl, topUrls, hourly, statusByBot, userAgents, dailyBots, trackedBotsPresent } = data;
 
   const statusGroupData = Object.entries(summary.statusGroups).map(([k, v]) => ({
     name: k, value: v as number,
@@ -128,6 +200,32 @@ export default function DashboardPage() {
     const group = `${Math.floor(row.statusCode / 100)}xx`;
     botStatusMap[row.botName][group] = (botStatusMap[row.botName][group] || 0) + row.count;
   }
+
+  // Prepare daily bot chart data: flatten { date, counts } into { date, [bot]: n, ... }
+  const dailyChartData = useMemo(() => {
+    return (dailyBots || []).map((day) => {
+      const row: Record<string, any> = { date: day.date, total: day.total };
+      for (const botName of trackedBotsPresent || []) {
+        row[botName] = day.counts[botName] || 0;
+      }
+      return row;
+    });
+  }, [dailyBots, trackedBotsPresent]);
+
+  const totalBotVisits = useMemo(
+    () => (dailyBots || []).reduce((sum, d) => sum + d.total, 0),
+    [dailyBots],
+  );
+  const topBot = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const d of dailyBots || []) {
+      for (const [bot, c] of Object.entries(d.counts)) {
+        totals[bot] = (totals[bot] || 0) + c;
+      }
+    }
+    const entries = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+    return entries[0] || null;
+  }, [dailyBots]);
 
   return (
     <div className="min-h-screen">
@@ -179,6 +277,98 @@ export default function DashboardPage() {
 
           {/* Crawl Budget Tab */}
           <TabsContent value="crawl" className="space-y-4">
+            {/* Daily bot visits — stacked bars */}
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <CardTitle className="text-sm font-medium">
+                      Обращения ботов по дням
+                    </CardTitle>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Поисковые боты и LLM-краулеры. Наведите на столбец, чтобы увидеть разбивку.
+                    </div>
+                  </div>
+                  {totalBotVisits > 0 && (
+                    <div className="flex items-center gap-4 text-xs">
+                      <div>
+                        <div className="text-muted-foreground">Всего обращений</div>
+                        <div className="font-semibold tabular-nums text-sm" data-testid="kpi-daily-total">
+                          {totalBotVisits.toLocaleString("ru-RU")}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Ботов найдено</div>
+                        <div className="font-semibold tabular-nums text-sm">
+                          {(trackedBotsPresent || []).length}
+                        </div>
+                      </div>
+                      {topBot && (
+                        <div>
+                          <div className="text-muted-foreground">Топ бот</div>
+                          <div
+                            className="font-semibold text-sm"
+                            style={{ color: getBotColor(topBot[0]) }}
+                            data-testid="kpi-top-bot"
+                          >
+                            {topBot[0]}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {dailyChartData.length > 0 && (trackedBotsPresent || []).length > 0 ? (
+                  <ResponsiveContainer width="100%" height={340}>
+                    <BarChart
+                      data={dailyChartData}
+                      margin={{ left: 0, right: 10, top: 5, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 11 }}
+                        stroke="hsl(var(--muted-foreground))"
+                        interval="preserveStartEnd"
+                        minTickGap={40}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11 }}
+                        stroke="hsl(var(--muted-foreground))"
+                        allowDecimals={false}
+                        width={50}
+                      />
+                      <Tooltip
+                        content={<DailyBotsTooltip />}
+                        cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }}
+                      />
+                      <Legend
+                        wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                        iconType="square"
+                        iconSize={10}
+                      />
+                      {(trackedBotsPresent || []).map((bot, i) => (
+                        <Bar
+                          key={bot}
+                          dataKey={bot}
+                          name={bot}
+                          stackId="bots"
+                          fill={getBotColor(bot, i)}
+                          maxBarSize={40}
+                        />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-[200px] text-sm text-muted-foreground">
+                    Целевые боты в логе не обнаружены
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <div className="grid lg:grid-cols-2 gap-4">
               <Card>
                 <CardHeader className="pb-2">
@@ -373,8 +563,14 @@ export default function DashboardPage() {
                     <TableBody>
                       {(userAgents || []).map((row, i) => (
                         <TableRow key={i}>
-                          <TableCell className="text-xs font-mono max-w-[300px] truncate" title={row.userAgent}>
-                            {row.userAgent}
+                          <TableCell className="align-top py-2">
+                            <div
+                              className="text-xs font-mono text-foreground max-w-[460px] truncate"
+                              title={row.userAgent}
+                              data-testid={`text-useragent-${i}`}
+                            >
+                              {row.userAgent || "(пусто)"}
+                            </div>
                           </TableCell>
                           <TableCell>
                             {row.isBot ? (

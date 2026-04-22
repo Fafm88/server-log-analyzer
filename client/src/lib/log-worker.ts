@@ -3,7 +3,7 @@
 // Aggregates analytics on-the-fly — no entry storage
 // =============================================
 
-// --- Types (duplicated here because workers are isolated) ---
+// --- Types ---
 
 interface WorkerAnalytics {
   sessionMeta: {
@@ -27,21 +27,47 @@ interface WorkerAnalytics {
   topUrls: { url: string; count: number; avgStatus: number }[];
   hourly: { hour: string; total: number; bots: number }[];
   statusByBot: { botName: string; statusCode: number; count: number }[];
+  // Daily stats: per-day counts for each tracked AI/search bot
+  dailyBots: { date: string; counts: Record<string, number>; total: number }[];
+  trackedBotsPresent: string[]; // ordered list of tracked bots actually seen
 }
 
-// --- Bot detection ---
+// =============================================
+// Bot detection
+// =============================================
+// Order matters — more specific patterns first.
+// Bots listed in TRACKED_BOTS are highlighted on the daily chart.
 const BOT_PATTERNS: [RegExp, string][] = [
+  // OpenAI — specific before generic
+  [/OAI-SearchBot/i, "OAI-SearchBot"],
+  [/ChatGPT-User/i, "ChatGPT-User"],
+  [/GPTBot/i, "GPTBot"],
+
+  // Anthropic — specific before generic
+  [/Claude-SearchBot/i, "Claude-SearchBot"],
+  [/Claude-User/i, "Claude-User"],
+  [/ClaudeBot/i, "ClaudeBot"],
+  [/anthropic-ai/i, "Anthropic-AI"],
+
+  // Perplexity
+  [/Perplexity-User/i, "Perplexity-User"],
+  [/PerplexityBot/i, "PerplexityBot"],
+
+  // Google — specific variants first
+  [/Google-Extended/i, "Google-Extended"],
   [/Googlebot-Image/i, "Googlebot-Image"],
   [/Googlebot-Video/i, "Googlebot-Video"],
   [/Googlebot-News/i, "Googlebot-News"],
-  [/Googlebot/i, "Googlebot"],
   [/Google-InspectionTool/i, "Google-InspectionTool"],
   [/Storebot-Google/i, "Storebot-Google"],
   [/AdsBot-Google/i, "AdsBot-Google"],
   [/Mediapartners-Google/i, "Mediapartners-Google"],
   [/APIs-Google/i, "APIs-Google"],
   [/GoogleOther/i, "GoogleOther"],
-  [/YandexBot/i, "YandexBot"],
+  [/Googlebot/i, "Googlebot"],
+
+  // Yandex
+  [/YandexAdditional/i, "YandexAdditionalBot"],
   [/YandexImages/i, "YandexImages"],
   [/YandexMedia/i, "YandexMedia"],
   [/YandexMetrika/i, "YandexMetrika"],
@@ -50,29 +76,60 @@ const BOT_PATTERNS: [RegExp, string][] = [
   [/YandexMobileBot/i, "YandexMobileBot"],
   [/YandexPagechecker/i, "YandexPagechecker"],
   [/YandexWebmaster/i, "YandexWebmaster"],
-  [/bingbot/i, "Bingbot"],
+  [/YandexBot/i, "YandexBot"],
+
+  // Microsoft / Bing
+  [/bingbot/i, "bingbot"],
   [/msnbot/i, "MSNBot"],
   [/BingPreview/i, "BingPreview"],
+
+  // Other AI / search bots
+  [/DeepSeek/i, "DeepSeekBot"],
+  [/Bytespider/i, "Bytespider"],
+  [/CCBot/i, "CCBot"],
+  [/Meta-ExternalAgent/i, "Meta-ExternalAgent"],
+  [/facebot|facebookexternalhit/i, "Facebook"],
+
+  // Search engines (non-tracked)
   [/Baiduspider/i, "Baiduspider"],
   [/DuckDuckBot/i, "DuckDuckBot"],
+  [/DuckAssistBot/i, "DuckAssistBot"],
   [/Applebot/i, "Applebot"],
   [/Sogou/i, "Sogou"],
-  [/facebot|facebookexternalhit/i, "Facebook"],
   [/Twitterbot/i, "Twitterbot"],
   [/LinkedInBot/i, "LinkedInBot"],
+
+  // SEO tools
   [/SemrushBot/i, "SemrushBot"],
   [/AhrefsBot/i, "AhrefsBot"],
   [/MJ12bot/i, "MJ12bot"],
   [/DotBot/i, "DotBot"],
   [/PetalBot/i, "PetalBot"],
-  [/Bytespider/i, "Bytespider"],
-  [/GPTBot/i, "GPTBot"],
-  [/ClaudeBot/i, "ClaudeBot"],
-  [/CCBot/i, "CCBot"],
-  [/ChatGPT-User/i, "ChatGPT-User"],
-  [/PerplexityBot/i, "PerplexityBot"],
+
+  // Generic fallback
   [/bot|crawler|spider|scraper/i, "Other Bot"],
 ];
+
+// Tracked bots for the daily chart — user-specified priority list
+const TRACKED_BOTS = [
+  "GPTBot",
+  "OAI-SearchBot",
+  "ChatGPT-User",
+  "Googlebot",
+  "Google-Extended",
+  "bingbot",
+  "ClaudeBot",
+  "Claude-User",
+  "Claude-SearchBot",
+  "PerplexityBot",
+  "Perplexity-User",
+  "DeepSeekBot",
+  "Bytespider",
+  "YandexAdditionalBot",
+  "YandexBot",
+  "CCBot",
+];
+const TRACKED_SET = new Set(TRACKED_BOTS);
 
 function detectBot(ua: string): { isBot: boolean; botName: string | null } {
   for (const [pattern, name] of BOT_PATTERNS) {
@@ -81,7 +138,9 @@ function detectBot(ua: string): { isBot: boolean; botName: string | null } {
   return { isBot: false, botName: null };
 }
 
-// --- Line parser ---
+// =============================================
+// Line parser
+// =============================================
 const COMBINED_REGEX = /^(\S+)\s+\S+\s+\S+\s+\[([^\]]+)\]\s+"(\S+)\s+(\S+)\s*(\S*)"\s+(\d{3})\s+(\d+|-)\s+"([^"]*)"\s+"([^"]*)"/;
 
 const MONTHS: Record<string, string> = {
@@ -95,7 +154,9 @@ function parseTimestamp(raw: string): string {
   return raw;
 }
 
-// --- Streaming aggregator ---
+// =============================================
+// Streaming aggregator
+// =============================================
 class StreamingAggregator {
   totalLines = 0;
   parsedLines = 0;
@@ -103,20 +164,19 @@ class StreamingAggregator {
   botRequests = 0;
   errorRequests = 0;
 
-  // Status codes
   statusMap = new Map<number, number>();
-  // User-Agent stats (keyed by truncated UA to limit memory)
-  uaMap = new Map<string, { ua: string; botName: string | null; isBot: boolean; count: number }>();
-  // Bot crawl: botName -> { count, urls (Set capped), errors }
+  // UA string -> counts + meta
+  uaMap = new Map<string, { userAgent: string; botName: string | null; isBot: boolean; count: number }>();
   botMap = new Map<string, { count: number; urls: Set<string>; errors: number }>();
-  // Top URLs (approximate — keep top N using a count map)
   urlMap = new Map<string, { count: number; statusSum: number }>();
-  // Hourly
   hourMap = new Map<string, { total: number; bots: number }>();
-  // Status by bot
   statusByBotMap = new Map<string, Map<number, number>>();
 
-  // Limit maps to avoid OOM on pathological inputs
+  // NEW: daily stats per tracked bot
+  // date (YYYY-MM-DD) -> botName -> count
+  dailyBotMap = new Map<string, Map<string, number>>();
+  trackedPresent = new Set<string>();
+
   private readonly MAX_UA = 10000;
   private readonly MAX_URLS = 50000;
   private readonly MAX_BOT_URLS = 5000;
@@ -138,17 +198,16 @@ class StreamingAggregator {
     if (bot.isBot) this.botRequests++;
     if (statusCode >= 400) this.errorRequests++;
 
-    // Status codes
     this.statusMap.set(statusCode, (this.statusMap.get(statusCode) || 0) + 1);
 
-    // User-Agent
+    // User-Agent (NOTE: key name `userAgent` matches the consumer contract)
     if (this.uaMap.size < this.MAX_UA || this.uaMap.has(userAgent)) {
       const existing = this.uaMap.get(userAgent);
       if (existing) {
         existing.count++;
       } else {
         this.uaMap.set(userAgent, {
-          ua: userAgent.length > 120 ? userAgent.slice(0, 120) + "..." : userAgent,
+          userAgent: userAgent.length > 160 ? userAgent.slice(0, 160) + "…" : userAgent,
           botName: bot.botName,
           isBot: bot.isBot,
           count: 1,
@@ -156,7 +215,7 @@ class StreamingAggregator {
       }
     }
 
-    // Bot crawl
+    // Bot crawl + status by bot
     if (bot.isBot && bot.botName) {
       const existing = this.botMap.get(bot.botName);
       if (existing) {
@@ -171,10 +230,21 @@ class StreamingAggregator {
         });
       }
 
-      // Status by bot
       if (!this.statusByBotMap.has(bot.botName)) this.statusByBotMap.set(bot.botName, new Map());
       const inner = this.statusByBotMap.get(bot.botName)!;
       inner.set(statusCode, (inner.get(statusCode) || 0) + 1);
+
+      // Daily stats for tracked bots
+      if (TRACKED_SET.has(bot.botName)) {
+        this.trackedPresent.add(bot.botName);
+        const date = timestamp.slice(0, 10); // YYYY-MM-DD
+        let byBot = this.dailyBotMap.get(date);
+        if (!byBot) {
+          byBot = new Map();
+          this.dailyBotMap.set(date, byBot);
+        }
+        byBot.set(bot.botName, (byBot.get(bot.botName) || 0) + 1);
+      }
     }
 
     // URLs
@@ -200,40 +270,33 @@ class StreamingAggregator {
   }
 
   finalize(filename: string): WorkerAnalytics {
-    // Status codes sorted
     const statusCodes = Array.from(this.statusMap.entries())
       .map(([statusCode, count]) => ({ statusCode, count }))
       .sort((a, b) => b.count - a.count);
 
-    // Status groups
     const statusGroups: Record<string, number> = {};
     for (const { statusCode, count } of statusCodes) {
       const group = `${Math.floor(statusCode / 100)}xx`;
       statusGroups[group] = (statusGroups[group] || 0) + count;
     }
 
-    // User agents — top 50
     const userAgents = Array.from(this.uaMap.values())
       .sort((a, b) => b.count - a.count)
       .slice(0, 50);
 
-    // Bot crawl
     const botCrawl = Array.from(this.botMap.entries())
       .map(([botName, v]) => ({ botName, count: v.count, urls: v.urls.size, errors: v.errors }))
       .sort((a, b) => b.count - a.count);
 
-    // Top URLs
     const topUrls = Array.from(this.urlMap.entries())
       .map(([url, v]) => ({ url, count: v.count, avgStatus: Math.round(v.statusSum / v.count) }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 30);
 
-    // Hourly
     const hourly = Array.from(this.hourMap.entries())
       .map(([hour, v]) => ({ hour, total: v.total, bots: v.bots }))
       .sort((a, b) => a.hour.localeCompare(b.hour));
 
-    // Status by bot
     const statusByBot: { botName: string; statusCode: number; count: number }[] = [];
     for (const [botName, inner] of this.statusByBotMap) {
       for (const [statusCode, count] of inner) {
@@ -241,6 +304,22 @@ class StreamingAggregator {
       }
     }
     statusByBot.sort((a, b) => a.botName.localeCompare(b.botName) || b.count - a.count);
+
+    // Daily bot stats — fill missing dates, keep chronological order
+    const dailyDates = Array.from(this.dailyBotMap.keys()).sort();
+    const dailyBots = dailyDates.map((date) => {
+      const inner = this.dailyBotMap.get(date)!;
+      const counts: Record<string, number> = {};
+      let total = 0;
+      for (const [bot, c] of inner) {
+        counts[bot] = c;
+        total += c;
+      }
+      return { date, counts, total };
+    });
+
+    // Preserve TRACKED_BOTS order for bots actually present
+    const trackedBotsPresent = TRACKED_BOTS.filter((b) => this.trackedPresent.has(b));
 
     const id = typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -268,21 +347,23 @@ class StreamingAggregator {
       topUrls,
       hourly,
       statusByBot,
+      dailyBots,
+      trackedBotsPresent,
     };
   }
 }
 
-// --- Message handler ---
+// =============================================
+// Message handler
+// =============================================
 self.onmessage = async (e: MessageEvent) => {
   const { file, filename } = e.data as { file: File; filename: string };
   const agg = new StreamingAggregator();
 
   const fileSize = file.size;
-  const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB chunks
   let bytesRead = 0;
   let remainder = "";
 
-  // Use streaming reader for memory efficiency
   const reader = file.stream().getReader();
   const decoder = new TextDecoder("utf-8");
   let lastProgressAt = 0;
@@ -295,15 +376,12 @@ self.onmessage = async (e: MessageEvent) => {
       bytesRead += value.byteLength;
       const text = remainder + decoder.decode(value, { stream: true });
       const lines = text.split("\n");
-
-      // Last element is partial — save for next chunk
       remainder = lines.pop() || "";
 
       for (const line of lines) {
         if (line.length > 0) agg.addLine(line);
       }
 
-      // Throttled progress reporting — at most every 100ms
       const now = Date.now();
       if (now - lastProgressAt > 100) {
         lastProgressAt = now;
@@ -317,12 +395,10 @@ self.onmessage = async (e: MessageEvent) => {
       }
     }
 
-    // Process remainder
     if (remainder.trim().length > 0) {
       agg.addLine(remainder);
     }
 
-    // Final result
     const analytics = agg.finalize(filename);
     self.postMessage({ type: "done", analytics });
   } catch (err: any) {

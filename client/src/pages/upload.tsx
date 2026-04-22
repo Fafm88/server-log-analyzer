@@ -60,6 +60,8 @@ export default function UploadPage() {
             topUrls: analytics.topUrls,
             hourly: analytics.hourly,
             statusByBot: analytics.statusByBot,
+            dailyBots: analytics.dailyBots || [],
+            trackedBotsPresent: analytics.trackedBotsPresent || [],
           };
 
           if (sessionData.session.parsedLines === 0) {
