@@ -135,7 +135,7 @@ seo-log-analyzer/
 │   │   ├── upload.tsx               — загрузка файлов + прогресс
 │   │   └── dashboard.tsx            — все вкладки (~1400 строк)
 │   ├── lib/
-│   │   ├── log-worker.ts            — ⭐ парсер и агрегатор в Web Worker
+│   │   ├── log-worker.ts            — **ключевой**: парсер и агрегатор в Web Worker
 │   │   ├── log-store.tsx            — React Context store
 │   │   ├── csv.ts                   — экспорт CSV (RFC 4180 + BOM)
 │   │   └── log-parser.ts            — устаревший (не используется)
